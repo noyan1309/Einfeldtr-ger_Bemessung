@@ -1,0 +1,83 @@
+import streamlit as st
+import numpy as np
+import matplotlib.pyplot as plt
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+import io
+
+# 1. DATENBANK (Vollständig mit IPE 600)
+PROFIL_DATENBANK = {
+    "IPE 80": {"h": 80, "g": 6.0, "Wel": 20.0}, 
+    "IPE 100": {"h": 100, "g": 8.1, "Wel": 34.2},
+    "IPE 120": {"h": 120, "g": 10.4, "Wel": 54.7}, 
+    "IPE 140": {"h": 140, "g": 12.9, "Wel": 77.3},
+    "IPE 160": {"h": 160, "g": 15.8, "Wel": 109.0}, 
+    "IPE 180": {"h": 180, "g": 18.8, "Wel": 146.0},
+    "IPE 200": {"h": 200, "g": 22.4, "Wel": 194.0}, 
+    "IPE 220": {"h": 220, "g": 26.2, "Wel": 252.0},
+    "IPE 240": {"h": 240, "g": 30.7, "Wel": 324.0}, 
+    "IPE 270": {"h": 270, "g": 36.1, "Wel": 429.0},
+    "IPE 300": {"h": 300, "g": 42.2, "Wel": 557.0}, 
+    "IPE 330": {"h": 330, "g": 49.1, "Wel": 713.0},
+    "IPE 360": {"h": 360, "g": 57.1, "Wel": 904.0}, 
+    "IPE 400": {"h": 400, "g": 66.3, "Wel": 1160.0},
+    "IPE 450": {"h": 450, "g": 77.6, "Wel": 1500.0}, 
+    "IPE 500": {"h": 500, "g": 90.7, "Wel": 1930.0},
+    "IPE 550": {"h": 550, "g": 106.0, "Wel": 2440.0}, 
+    "IPE 600": {"h": 600, "g": 122.0, "Wel": 3070.0}
+}
+}
+STAHLGUETEN = {"S235": 235.0, "S355": 355.0, "S460": 460.0}
+
+# 2. BERECHNUNGSLOGIK
+def berechne_statik(L, delta_g_k, Q_k, profil_name):
+    gamma_G, gamma_Q = 1.35, 1.50
+    q_delta_d = delta_g_k * gamma_G
+    g_k = (PROFIL_DATENBANK[profil_name]["g"] * 9.81) / 1000.0
+    q_g_d = g_k * gamma_G
+    q_d_total = q_delta_d + q_g_d
+    Q_d = Q_k * gamma_Q
+    
+    M_Ed_max = (q_d_total * L**2 / 8) + (Q_d * L / 4)
+    V_Ed_max = (q_d_total * L / 2) + (Q_d / 2)
+    return M_Ed_max, V_Ed_max
+
+# 3. STREAMLIT UI
+st.title("🏗️ Bemessung Einfeldträger")
+
+# Eingabefelder
+L = st.number_input("Stützweite L [m]", min_value=0.1, value=15.0)
+dg = st.number_input("Ausbaulast Δg [kN/m]", min_value=0.0, value=16.0)
+Q = st.number_input("Einzellast Q [kN]", min_value=0.0, value=18.0)
+stahl = st.selectbox("Stahlgüte", list(STAHLGUETEN.keys()))
+
+if st.button("Berechnen"):
+    f_y = STAHLGUETEN[stahl]
+    gewaehltes_profil = None
+    
+    for name in sorted(PROFIL_DATENBANK.keys(), key=lambda x: PROFIL_DATENBANK[x]["h"]):
+        M, V = berechne_statik(L, dg, Q, name)
+        sigma = (M * 1000) / PROFIL_DATENBANK[name]["Wel"]
+        
+        if sigma <= f_y:
+            gewaehltes_profil = name
+            ausnutzung = (sigma / f_y) * 100
+            
+            st.success(f"Wirtschaftlichstes Profil: **{name}**")
+            st.metric("Ausnutzung", f"{ausnutzung:.1f} %")
+            
+            # PDF Bericht erstellen
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=letter)
+            styles = getSampleStyleSheet()
+            story = [Paragraph("Ergebnisbericht", styles['Title']), Spacer(1, 12),
+                     Paragraph(f"Profil: {name}", styles['Normal']),
+                     Paragraph(f"Ausnutzung: {ausnutzung:.1f} %", styles['Normal'])]
+            doc.build(story)
+            
+            st.download_button("PDF Bericht herunterladen", buffer.getvalue(), "bericht.pdf", "application/pdf")
+            break
+    else:
+        st.error("Last zu hoch für vorhandene Profile!")
